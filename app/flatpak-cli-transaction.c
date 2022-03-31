@@ -800,7 +800,7 @@ end_of_lifed_with_rebase (FlatpakTransaction *transaction,
 
           if (apps && apps->len > 0)
             {
-              g_print (_("Applications using this runtime:\n"));
+              g_print (_("Info: applications using this runtime:\n"));
               g_print ("   ");
               for (int i = 0; i < apps->len; i++)
                 {
