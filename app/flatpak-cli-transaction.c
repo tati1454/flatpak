@@ -727,6 +727,41 @@ print_eol_info_message (FlatpakDir        *dir,
     }
 }
 
+static void
+check_current_transaction_for_dependent_apps (GPtrArray          *apps,
+                                              FlatpakTransaction *transaction,
+                                              FlatpakDecomposed  *ref)
+{
+  g_autoptr(FlatpakTransactionOperation) ref_op = NULL;
+  GPtrArray *related_ops;
+
+  ref_op = flatpak_transaction_get_operation_for_ref (transaction, NULL, flatpak_decomposed_get_ref (ref), NULL);
+  if (ref_op == NULL)
+    g_assert_not_reached ();
+
+  related_ops = flatpak_transaction_operation_get_related_to_ops (ref_op);
+  if (related_ops == NULL)
+    return;
+
+  for (int i = 0; i < related_ops->len; i++)
+    {
+      FlatpakTransactionOperation *related_op = g_ptr_array_index (related_ops, i);
+      const char *related_op_ref = flatpak_transaction_operation_get_ref (related_op);
+      g_autoptr(FlatpakDecomposed) related_op_decomposed = flatpak_decomposed_new_from_ref (related_op_ref, NULL);
+
+      if (related_op_decomposed == NULL)
+        continue;
+      if (flatpak_decomposed_id_is_subref (related_op_decomposed))
+        continue;
+
+      /* Recurse in case @ref was a runtime extension */
+      if (flatpak_decomposed_is_runtime (related_op_decomposed))
+        check_current_transaction_for_dependent_apps (apps, transaction, related_op_decomposed);
+      else if (!g_ptr_array_find_with_equal_func (apps, related_op_decomposed, (GEqualFunc)flatpak_decomposed_equal, NULL))
+        g_ptr_array_add (apps, g_steal_pointer (&related_op_decomposed));
+    }
+}
+
 static gboolean
 end_of_lifed_with_rebase (FlatpakTransaction *transaction,
                           const char         *remote,
@@ -798,7 +833,15 @@ end_of_lifed_with_rebase (FlatpakTransaction *transaction,
           /* Include apps which are using the ref as an extension of their runtime */
           g_ptr_array_extend_and_steal (apps, g_steal_pointer (&indirect_apps));
 
-          if (apps && apps->len > 0)
+          /* Also check the current transaction since it's possible the EOL ref
+           * and/or any app(s) that depend on it are not installed. It's also
+           * possible the current transaction updates one of the apps to a
+           * newer runtime but we don't handle that yet
+           * (https://github.com/flatpak/flatpak/issues/4832)
+           */
+          check_current_transaction_for_dependent_apps (apps, transaction, ref);
+
+          if (apps->len > 0)
             {
               g_print (_("Info: applications using this runtime:\n"));
               g_print ("   ");
