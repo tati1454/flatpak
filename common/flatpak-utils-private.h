@@ -359,6 +359,11 @@ g_hash_table_steal_extended (GHashTable    *hash_table,
 }
 #endif
 
+#if !GLIB_CHECK_VERSION (2, 62, 0)
+void g_ptr_array_extend_and_steal         (GPtrArray        *array_to_extend,
+                                           GPtrArray        *array);
+#endif
+
 #if !GLIB_CHECK_VERSION (2, 68, 0)
 guint g_string_replace (GString     *string,
                         const gchar *find,

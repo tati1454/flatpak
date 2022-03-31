@@ -793,6 +793,11 @@ end_of_lifed_with_rebase (FlatpakTransaction *transaction,
       if (flatpak_decomposed_is_runtime (ref) && !rebased_to_ref)
         {
           g_autoptr(GPtrArray) apps = flatpak_dir_list_app_refs_with_runtime (dir, ref, NULL, NULL);
+          g_autoptr(GPtrArray) indirect_apps = flatpak_dir_list_app_refs_with_runtime_extension (dir, ref, NULL, NULL);
+
+          /* Include apps which are using the ref as an extension of their runtime */
+          g_ptr_array_extend_and_steal (apps, g_steal_pointer (&indirect_apps));
+
           if (apps && apps->len > 0)
             {
               g_print (_("Applications using this runtime:\n"));

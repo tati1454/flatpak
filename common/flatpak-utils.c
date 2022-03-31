@@ -9194,6 +9194,18 @@ running_under_sudo (void)
   return FALSE;
 }
 
+#if !GLIB_CHECK_VERSION (2, 62, 0)
+void
+g_ptr_array_extend_and_steal (GPtrArray  *array_to_extend,
+                              GPtrArray  *array)
+{
+  for (gsize i = array->len; i > 0; i--)
+    g_ptr_array_add (array_to_extend, g_ptr_array_steal_index_fast (array, i - 1));
+
+  g_ptr_array_unref (array);
+}
+#endif
+
 #if !GLIB_CHECK_VERSION (2, 68, 0)
 /* All this code is backported directly from glib */
 guint

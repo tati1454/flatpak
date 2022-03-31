@@ -650,6 +650,10 @@ GPtrArray *           flatpak_dir_list_app_refs_with_runtime                (Fla
                                                                              FlatpakDecomposed             *runtime_ref,
                                                                              GCancellable                  *cancellable,
                                                                              GError                       **error);
+GPtrArray *           flatpak_dir_list_app_refs_with_runtime_extension      (FlatpakDir                    *self,
+                                                                             FlatpakDecomposed             *runtime_ext_ref,
+                                                                             GCancellable                  *cancellable,
+                                                                             GError                       **error);
 GVariant *            flatpak_dir_read_latest_commit                        (FlatpakDir                    *self,
                                                                              const char                    *remote,
                                                                              FlatpakDecomposed             *ref,

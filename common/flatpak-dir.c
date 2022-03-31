@@ -6610,12 +6610,84 @@ flatpak_dir_list_app_refs_with_runtime (FlatpakDir        *self,
       FlatpakDecomposed *app_ref = g_ptr_array_index (app_refs, i);
       /* deploy v4 guarantees runtime info */
       g_autoptr(GBytes) app_deploy_data = flatpak_dir_get_deploy_data (self, app_ref, 4, NULL, NULL);
+      const char *app_runtime;
 
-      if (app_deploy_data)
+      if (app_deploy_data == NULL)
+        continue;
+
+      app_runtime = flatpak_deploy_data_get_runtime (app_deploy_data);
+      if (g_strcmp0 (app_runtime, runtime_pref) == 0)
+        g_ptr_array_add (apps, flatpak_decomposed_ref (app_ref));
+    }
+
+  return g_steal_pointer (&apps);
+}
+
+GPtrArray *
+flatpak_dir_list_app_refs_with_runtime_extension (FlatpakDir        *self,
+                                                  FlatpakDecomposed *runtime_ext_ref,
+                                                  GCancellable      *cancellable,
+                                                  GError           **error)
+{
+  g_autoptr(GPtrArray) app_refs = NULL;
+  g_autoptr(GPtrArray) runtime_refs = NULL;
+  g_autoptr(GPtrArray) apps = g_ptr_array_new_with_free_func ((GDestroyNotify)flatpak_decomposed_unref);
+  g_autoptr(GPtrArray) matching_runtimes = g_ptr_array_new ();
+  g_autoptr(GBytes) ext_deploy_data = NULL;
+
+  /* deploy v4 guarantees extension-of info */
+  ext_deploy_data = flatpak_dir_get_deploy_data (self, runtime_ext_ref, 4, NULL, NULL);
+  /* Don't waste time if it's not an extension */
+  if (ext_deploy_data && flatpak_deploy_data_get_extension_of (ext_deploy_data) == NULL)
+    return g_steal_pointer (&apps);
+
+  /* First find runtimes that have @runtime_ref as an extension */
+  runtime_refs = flatpak_dir_list_refs (self, FLATPAK_KINDS_RUNTIME, NULL, NULL);
+  for (int i = 0; runtime_refs != NULL && i < runtime_refs->len; i++)
+    {
+      FlatpakDecomposed *runtime_ref = g_ptr_array_index (runtime_refs, i);
+      g_autoptr(GPtrArray) related = NULL;
+
+      if (flatpak_decomposed_id_is_subref (runtime_ref))
+        continue;
+
+      related = flatpak_dir_find_local_related (self, runtime_ref, NULL, TRUE, cancellable, error);
+      if (related == NULL)
+        return NULL;
+
+      for (int j = 0; j < related->len; j++)
         {
-          const char *app_runtime = flatpak_deploy_data_get_runtime (app_deploy_data);
-          if (g_strcmp0 (app_runtime, runtime_pref) == 0)
-            g_ptr_array_add (apps, flatpak_decomposed_ref (app_ref));
+          FlatpakRelated *rel = g_ptr_array_index (related, j);
+          if (flatpak_decomposed_equal (rel->ref, runtime_ext_ref))
+            g_ptr_array_add (matching_runtimes, runtime_ref);
+        }
+    }
+
+  if (matching_runtimes->len == 0)
+    return g_steal_pointer (&apps);
+
+  /* Then find apps that use those matching runtimes */
+  app_refs = flatpak_dir_list_refs (self, FLATPAK_KINDS_APP, NULL, NULL);
+  for (int i = 0; app_refs != NULL && i < app_refs->len; i++)
+    {
+      FlatpakDecomposed *app_ref = g_ptr_array_index (app_refs, i);
+      /* deploy v4 guarantees runtime info */
+      g_autoptr(GBytes) app_deploy_data = flatpak_dir_get_deploy_data (self, app_ref, 4, NULL, NULL);
+      const char *app_runtime;
+
+      if (app_deploy_data == NULL)
+        continue;
+
+      app_runtime = flatpak_deploy_data_get_runtime (app_deploy_data);
+      for (int j = 0; j < matching_runtimes->len; j++)
+        {
+          FlatpakDecomposed *matching_runtime = g_ptr_array_index (matching_runtimes, j);
+          const char *matching_runtime_pref = flatpak_decomposed_get_pref (matching_runtime);
+          if (g_strcmp0 (app_runtime, matching_runtime_pref) == 0)
+            {
+              g_ptr_array_add (apps, flatpak_decomposed_ref (app_ref));
+              break;
+            }
         }
     }
 
