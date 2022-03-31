@@ -95,10 +95,18 @@ uninstall_dir_free (UninstallDir *udir)
 
 static void
 uninstall_dir_add_ref (UninstallDir *udir,
-                       FlatpakDecomposed*ref)
+                       FlatpakDecomposed *ref)
 {
   if (g_hash_table_insert (udir->refs_hash, flatpak_decomposed_ref (ref), NULL))
     g_ptr_array_add (udir->refs, flatpak_decomposed_ref (ref));
+}
+
+static void
+uninstall_dir_remove_ref (UninstallDir *udir,
+                          FlatpakDecomposed *ref)
+{
+  g_hash_table_remove (udir->refs_hash, ref);
+  g_ptr_array_remove (udir->refs, ref);
 }
 
 static UninstallDir *
@@ -136,6 +144,70 @@ flatpak_delete_data (gboolean    yes_opt,
     }
 
   if (!reset_permissions_for_app (app_id, error))
+    return FALSE;
+
+  return TRUE;
+}
+
+static gboolean
+confirm_runtime_extension_removal (gboolean           yes_opt,
+                                   UninstallDir      *udir,
+                                   FlatpakDecomposed *ref)
+{
+  g_autoptr(GPtrArray) apps = NULL;
+  g_autofree char *ref_name = NULL;
+  const char *ref_branch;
+  const char *on = "";
+  const char *off = "";
+
+  if (flatpak_fancy_output ())
+    {
+      on = FLATPAK_ANSI_BOLD_ON;
+      off = FLATPAK_ANSI_BOLD_OFF;
+    }
+
+  apps = flatpak_dir_list_app_refs_with_runtime_extension (udir->dir, ref, NULL, NULL);
+  if (apps == NULL || apps->len == 0)
+    return TRUE;
+
+  /* Exclude any apps that will be removed by the current transaction */
+  for (int i = 0; i < udir->refs->len; i++)
+    {
+      FlatpakDecomposed *uninstall_ref = g_ptr_array_index (udir->refs, i);
+      if (flatpak_decomposed_is_runtime (uninstall_ref))
+        continue;
+      for (int j = apps->len; j > 0; j--)
+        {
+          FlatpakDecomposed *app_ref = g_ptr_array_index (apps, j - 1);
+          if (flatpak_decomposed_equal (app_ref, uninstall_ref))
+            {
+              g_ptr_array_remove (apps, app_ref);
+              break;
+            }
+        }
+    }
+
+  if (apps->len == 0)
+    return TRUE;
+
+  ref_name = flatpak_decomposed_dup_id (ref);
+  ref_branch = flatpak_decomposed_get_branch (ref);
+
+  g_print (_("Applications using the runtime %s%s%s branch %s%s%s:\n"),
+           on, ref_name, off, on, ref_branch, off);
+  g_print ("   ");
+  for (int i = 0; i < apps->len; i++)
+    {
+      FlatpakDecomposed *app_ref = g_ptr_array_index (apps, i);
+      g_autofree char *id = flatpak_decomposed_dup_id (app_ref);
+      if (i != 0)
+        g_print (", ");
+      g_print ("%s", id);
+    }
+  g_print ("\n");
+
+  if (!yes_opt &&
+      !flatpak_yes_no_prompt (FALSE, _("Really remove?")))
     return FALSE;
 
   return TRUE;
@@ -382,9 +454,22 @@ flatpak_builtin_uninstall (int argc, char **argv, GCancellable *cancellable, GEr
     /* This disables the remote metadata update, since uninstall is a local-only op */
     flatpak_transaction_set_no_pull (transaction, TRUE);
 
-    for (i = 0; i < udir->refs->len; i++)
+    /* Walk through the array backwards so we can safely remove */
+    for (i = udir->refs->len; i > 0; i--)
       {
-        FlatpakDecomposed *ref = g_ptr_array_index (udir->refs, i);
+        FlatpakDecomposed *ref = g_ptr_array_index (udir->refs, i - 1);
+
+        /* In case it's a required runtime, the transaction will fail later on.
+         * In case it's an optional runtime extension of an installed app,
+         * prompt the user for confirmation
+         */
+        if (!opt_force_remove &&
+            flatpak_decomposed_is_runtime (ref) &&
+            !confirm_runtime_extension_removal (opt_yes, udir, ref))
+          {
+            uninstall_dir_remove_ref (udir, ref);
+            continue;
+          }
 
         if (!flatpak_transaction_add_uninstall (transaction, flatpak_decomposed_get_ref (ref), error))
           return FALSE;
